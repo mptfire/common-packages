@@ -1,4 +1,4 @@
-import { generateSecretKey, finalizeEvent } from "nostr-tools";
+import { generateSecretKey, finalizeEvent, verifyEvent } from "nostr-tools";
 import type { EventTemplate, Event, VerifiedEvent } from "nostr-tools";
 import * as nip44 from "nostr-tools/nip44";
 
@@ -125,9 +125,20 @@ export async function unwrapEvent(
   const sealJson = await signer.nip44Decrypt(wrappedEvent.pubkey, wrappedEvent.content);
   const seal = JSON.parse(sealJson) as Event;
 
+  // The seal is the sender's authentication: anyone can encrypt a forged
+  // "seal" to the recipient's pubkey, so the signature AND the rumor/seal
+  // author binding must be checked before the rumor is trusted.
+  if (!verifyEvent(seal)) {
+    throw new Error("nip59: seal signature verification failed");
+  }
+
   // Decrypt seal → rumor
   const rumorJson = await signer.nip44Decrypt(seal.pubkey, seal.content);
-  return JSON.parse(rumorJson) as UnsignedEvent;
+  const rumor = JSON.parse(rumorJson) as UnsignedEvent;
+  if (rumor.pubkey !== seal.pubkey) {
+    throw new Error("nip59: rumor pubkey does not match seal author");
+  }
+  return rumor;
 }
 
 /** Randomize timestamp ±2 days to prevent timing analysis */
